@@ -1,0 +1,293 @@
+"use client";
+import { useState, useEffect } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { leaseAPI } from "@/app/services/api";
+
+const NAV_SECTIONS = [
+  { label:"Main", items:[
+    { icon:"⚡", label:"Dashboard", href:"/owner/dashboard", active:false },
+    { icon:"🏠", label:"Houses",   href:"/owner/houses",    active:false },
+    { icon:"👥", label:"Tenants",  href:"/owner/tenants",   active:false, badge:"12" },
+    { icon:"📋", label:"Leases",   href:"/owner/leases",    active:true },
+  ]},
+  { label:"Finance", items:[
+    { icon:"💳", label:"Payments",  href:"/owner/payments",  active:false, badge:"3" },
+    { icon:"📈", label:"Analytics", href:"/owner/analytics", active:false },
+    { icon:"🧾", label:"Invoices",  href:"/owner/invoices",  active:false },
+  ]},
+  { label:"Tools", items:[
+    { icon:"🔧", label:"Maintenance", href:"/owner/complaints", active:false, badge:"5" },
+    { icon:"💬", label:"Messages",   href:"/owner/messages",   active:false },
+    { icon:"⚙️", label:"Settings",  href:"/owner/settings",   active:false },
+  ]},
+];
+
+type LeaseStatus = "active"|"expiring"|"expired";
+
+// Format lease for display
+const formatLease = (lease: any) => {
+  const initials = lease.tenant?.name?.split(' ').map((n: string) => n[0]).join('') || 'UN';
+  const gradients = ['linear-gradient(135deg,#06b6d4,#8b5cf6)', 'linear-gradient(135deg,#f59e0b,#ef4444)', 
+    'linear-gradient(135deg,#ef4444,#ec4899)', 'linear-gradient(135deg,#22c55e,#06b6d4)', 
+    'linear-gradient(135deg,#8b5cf6,#6366f1)', 'linear-gradient(135deg,#06b6d4,#22c55e)'];
+  
+  const endDate = new Date(lease.end_date);
+  const now = new Date();
+  const monthsLeft = Math.floor((endDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24 * 30));
+  
+  let leaseStatus: LeaseStatus = 'active';
+  if (endDate < now) leaseStatus = 'expired';
+  else if (monthsLeft <= 3) leaseStatus = 'expiring';
+  
+  return {
+    id: `LSE-${String(lease.id).padStart(3, '0')}`,
+    tenant: lease.tenant?.name || 'Unknown',
+    initials,
+    unit: lease.unit?.unit_number || 'N/A',
+    property: lease.unit?.property?.name || 'N/A',
+    start: new Date(lease.start_date).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' }),
+    end: new Date(lease.end_date).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' }),
+    rent: `₹${lease.monthly_rent?.toLocaleString() || 0}`,
+    deposit: `₹${lease.security_deposit?.toLocaleString() || 0}`,
+    status: leaseStatus,
+    grad: gradients[lease.id % gradients.length],
+    monthsLeft: Math.max(0, monthsLeft),
+  };
+};
+
+export default function LeasesPage() {
+  const router = useRouter();
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [search,     setSearch]     = useState("");
+  const [filter,     setFilter]     = useState<LeaseStatus|"all">("all");
+  const [showModal,  setShowModal]  = useState(false);
+  const [selected,   setSelected]   = useState<any|null>(null);
+  const [leases,     setLeases]     = useState<any[]>([]);
+  const [loading,    setLoading]    = useState(true);
+  const [error,      setError]      = useState<string|null>(null);
+
+  useEffect(() => {
+    const fetchLeases = async () => {
+      try {
+        setLoading(true);
+        const response = await leaseAPI.getAll();
+        setLeases(response.data || []);
+        setError(null);
+      } catch (err: any) {
+        setError(err.message || 'Failed to fetch leases');
+        setLeases([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchLeases();
+  }, []);
+
+  const displayLeases = leases.map(formatLease);
+
+  const STATUS_MAP: Record<LeaseStatus,{bg:string;color:string;label:string}> = {
+    active:   {bg:"rgba(34,197,94,0.1)",  color:"#22c55e", label:"● Active"},
+    expiring: {bg:"rgba(245,158,11,0.1)", color:"#f59e0b", label:"⚠ Expiring Soon"},
+    expired:  {bg:"rgba(244,63,94,0.1)",  color:"#f43f5e", label:"✗ Expired"},
+  };
+
+  const filtered = displayLeases.filter(l=>
+    (filter==="all"||l.status===filter)&&
+    (l.tenant.toLowerCase().includes(search.toLowerCase())||
+     l.property.toLowerCase().includes(search.toLowerCase()))
+  );
+
+  return (
+    <>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+        *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+        html,body{height:100%;font-family:'Plus Jakarta Sans',sans-serif;background:#080e1a;color:#e2e8f0}
+        ::-webkit-scrollbar{width:4px;height:4px}::-webkit-scrollbar-thumb{background:#1e2d47;border-radius:4px}
+        @keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+        @keyframes pulse-ring{0%{transform:scale(1);opacity:.5}100%{transform:scale(1.6);opacity:0}}
+        .a1{animation:fadeUp .4s ease both .05s}.a2{animation:fadeUp .4s ease both .10s}
+        .a3{animation:fadeUp .4s ease both .15s}.a4{animation:fadeUp .4s ease both .20s}
+        .sb-link{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;font-size:13px;font-weight:500;color:#94a3b8;cursor:pointer;transition:all .15s;text-decoration:none;margin-bottom:2px;border:1px solid transparent}
+        .sb-link:hover{background:rgba(255,255,255,0.04);color:#e2e8f0}
+        .sb-link.active{background:rgba(6,182,212,0.1);color:#06b6d4;border-color:rgba(6,182,212,0.15)}
+        .sidebar{position:fixed;top:0;left:0;bottom:0;width:250px;background:#0d1526;border-right:1px solid #1e2d47;display:flex;flex-direction:column;z-index:300;transition:transform .3s ease}
+        .navbar{position:fixed;top:0;left:250px;right:0;height:62px;background:#0d1526;border-bottom:1px solid #1e2d47;display:flex;align-items:center;justify-content:space-between;padding:0 24px;z-index:200}
+        .page-main{margin-left:250px;margin-top:62px;padding:26px;min-height:calc(100vh - 62px)}
+        .glass-card{background:#111d33;border:1px solid #1e2d47;border-radius:14px;padding:20px}
+        .lease-row{display:grid;grid-template-columns:2fr 1.2fr 1fr 1fr 1fr 1fr auto;align-items:center;gap:12px;padding:14px 16px;border-radius:11px;border:1px solid #1e2d47;background:#0d1526;margin-bottom:8px;transition:border-color .15s;cursor:pointer}
+        .lease-row:hover{border-color:rgba(6,182,212,0.35)}
+        .lease-row:last-child{margin-bottom:0}
+        .lease-header{display:grid;grid-template-columns:2fr 1.2fr 1fr 1fr 1fr 1fr auto;gap:12px;padding:0 16px 10px;font-size:10px;font-weight:700;color:#4a6080;text-transform:uppercase;letter-spacing:.1em}
+        .filter-btn{padding:7px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid #1e2d47;background:#111d33;color:#94a3b8;transition:all .15s;font-family:inherit}
+        .filter-btn.active{background:rgba(6,182,212,0.1);color:#06b6d4;border-color:rgba(6,182,212,0.3)}
+        .filter-btn:hover{border-color:#06b6d4;color:#06b6d4}
+        .add-btn{background:linear-gradient(135deg,#06b6d4,#8b5cf6);border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:700;color:white;cursor:pointer;font-family:inherit;transition:transform .15s}
+        .add-btn:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(6,182,212,0.3)}
+        .mob-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:250;backdrop-filter:blur(2px)}
+        .nav-ico{width:36px;height:36px;border-radius:8px;background:#111d33;border:1px solid #1e2d47;display:grid;place-items:center;cursor:pointer;font-size:15px;position:relative;transition:border-color .2s;flex-shrink:0}
+        .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);z-index:500;display:flex;align-items:center;justify-content:center;padding:16px}
+        .modal-card{background:#0d1526;border:1px solid #1e2d47;border-radius:18px;padding:28px;width:100%;max-width:460px;position:relative;max-height:90vh;overflow-y:auto}
+        .table-wrap{overflow-x:auto}
+        .lease-row,.lease-header{min-width:720px}
+        @media(max-width:768px){
+          .sidebar{transform:translateX(-100%)}.sidebar.open{transform:translateX(0)}
+          .mob-overlay.open{display:block}
+          .navbar{left:0;padding:0 16px}.page-main{margin-left:0;padding:16px}
+          .mob-burger{display:grid !important}
+        }
+      `}</style>
+
+      <div className={`mob-overlay${mobileOpen?" open":""}`} onClick={()=>setMobileOpen(false)}/>
+
+      {selected&&(
+        <div className="modal-bg" onClick={()=>setSelected(null)}>
+          <div className="modal-card" onClick={e=>e.stopPropagation()}>
+            <button onClick={()=>setSelected(null)} style={{position:"absolute",top:16,right:16,background:"none",border:"1px solid #1e2d47",borderRadius:8,width:30,height:30,display:"grid",placeItems:"center",cursor:"pointer",color:"#94a3b8",fontSize:14,fontFamily:"inherit"}}>✕</button>
+            <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20}}>
+              <div style={{width:46,height:46,borderRadius:12,background:selected.grad,display:"grid",placeItems:"center",color:"white",fontSize:16,fontWeight:700,flexShrink:0}}>{selected.initials}</div>
+              <div>
+                <div style={{fontSize:17,fontWeight:800,color:"#e2e8f0"}}>{selected.tenant}</div>
+                <div style={{fontSize:12,color:"#4a6080"}}>{selected.unit} · {selected.property}</div>
+              </div>
+            </div>
+            <div style={{marginBottom:16,padding:"12px 14px",borderRadius:10,background:STATUS_MAP[selected.status].bg,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <span style={{fontSize:12,color:"#94a3b8"}}>Lease Status</span>
+              <span style={{fontSize:12,fontWeight:700,color:STATUS_MAP[selected.status].color}}>{STATUS_MAP[selected.status].label}</span>
+            </div>
+            {[
+              ["🆔 Lease ID",    selected.id],
+              ["📅 Start Date",  selected.start],
+              ["📅 End Date",    selected.end],
+              ["💰 Monthly Rent",selected.rent],
+              ["🏦 Deposit",     selected.deposit],
+              ["⏳ Months Left", selected.monthsLeft > 0 ? `${selected.monthsLeft} months` : "Expired"],
+            ].map(([k,v])=>(
+              <div key={k as string} style={{display:"flex",justifyContent:"space-between",padding:"10px 0",borderBottom:"1px solid #1e2d47",fontSize:13}}>
+                <span style={{color:"#4a6080"}}>{k}</span>
+                <span style={{color:"#e2e8f0",fontWeight:600}}>{v}</span>
+              </div>
+            ))}
+            <div style={{display:"flex",gap:8,marginTop:18}}>
+              <button className="add-btn" style={{flex:1,padding:"10px"}}>📄 Download PDF</button>
+              <button className="add-btn" style={{flex:1,padding:"10px",background:"linear-gradient(135deg,#8b5cf6,#6366f1)"}}>🔄 Renew</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <aside className={`sidebar${mobileOpen?" open":""}`}>
+        <div style={{height:62,display:"flex",alignItems:"center",gap:12,padding:"0 20px",borderBottom:"1px solid #1e2d47",flexShrink:0}}>
+          <div style={{position:"relative",width:34,height:34,borderRadius:9,background:"linear-gradient(135deg,#06b6d4,#8b5cf6)",display:"grid",placeItems:"center",fontSize:16,flexShrink:0}}>🏠
+            <div style={{position:"absolute",inset:-3,borderRadius:12,border:"1.5px solid rgba(6,182,212,0.35)",animation:"pulse-ring 2s ease-out infinite",pointerEvents:"none"}}/>
+          </div>
+          <div>
+            <div style={{fontSize:15,fontWeight:700,color:"#e2e8f0"}}>RentManager</div>
+            <div style={{fontSize:9,color:"#4a6080",textTransform:"uppercase",letterSpacing:"0.1em"}}>Property OS</div>
+          </div>
+        </div>
+        <nav style={{flex:1,padding:"16px 12px",overflowY:"auto"}}>
+          {NAV_SECTIONS.map(s=>(
+            <div key={s.label}>
+              <div style={{fontSize:9,fontWeight:700,color:"#4a6080",textTransform:"uppercase",letterSpacing:"0.14em",padding:"0 8px",margin:"16px 0 6px"}}>{s.label}</div>
+              {s.items.map(item=>(
+                <Link key={item.href} href={item.href} className={`sb-link${item.active?" active":""}`} onClick={()=>setMobileOpen(false)}>
+                  <span style={{fontSize:15,width:18,textAlign:"center",flexShrink:0}}>{item.icon}</span>
+                  <span style={{flex:1}}>{item.label}</span>
+                  {"badge" in item&&item.badge&&<span style={{fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:10,background:item.active?"rgba(6,182,212,0.15)":"rgba(255,255,255,0.05)",color:item.active?"#06b6d4":"#4a6080"}}>{item.badge}</span>}
+                </Link>
+              ))}
+            </div>
+          ))}
+        </nav>
+        <div style={{padding:"14px 12px",borderTop:"1px solid #1e2d47"}}>
+          <button onClick={()=>{localStorage.removeItem("rentmanager_user");document.cookie="role=; path=/; max-age=0";router.push("/login");}}
+            style={{display:"flex",alignItems:"center",gap:10,padding:9,borderRadius:9,cursor:"pointer",background:"transparent",border:"1px solid transparent",color:"#f43f5e",fontSize:13,fontWeight:500,fontFamily:"inherit",width:"100%",transition:"all .15s"}}
+            onMouseEnter={e=>{(e.currentTarget as HTMLButtonElement).style.background="rgba(244,63,94,0.07)";(e.currentTarget as HTMLButtonElement).style.borderColor="rgba(244,63,94,0.2)"}}
+            onMouseLeave={e=>{(e.currentTarget as HTMLButtonElement).style.background="transparent";(e.currentTarget as HTMLButtonElement).style.borderColor="transparent"}}>
+            <span>🚪</span><span>Logout</span>
+          </button>
+        </div>
+      </aside>
+
+      <header className="navbar">
+        <div style={{display:"flex",alignItems:"center",gap:14}}>
+          <button className="mob-burger" onClick={()=>setMobileOpen(true)} style={{display:"none",background:"none",border:"1px solid #1e2d47",borderRadius:7,padding:"6px 8px",cursor:"pointer",color:"#94a3b8",fontSize:16,fontFamily:"inherit"}}>☰</button>
+          <div>
+            <div style={{fontSize:15,fontWeight:700,color:"#e2e8f0"}}>Leases</div>
+            <div style={{fontSize:11,color:"#4a6080"}}>Home → Leases</div>
+          </div>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,background:"#111d33",border:"1px solid #1e2d47",borderRadius:8,padding:"7px 12px",width:220}}>
+            <span style={{color:"#4a6080",fontSize:13}}>🔍</span>
+            <input type="text" placeholder="Search leases…" value={search} onChange={e=>setSearch(e.target.value)} style={{background:"none",border:"none",outline:"none",fontSize:13,color:"#e2e8f0",fontFamily:"inherit",width:"100%"}}/>
+          </div>
+          <Link href="/owner/complaints" className="nav-ico" style={{textDecoration:"none"}}>🔔<div style={{position:"absolute",top:5,right:5,width:7,height:7,borderRadius:"50%",background:"#f43f5e",border:"2px solid #0d1526"}}/></Link>
+          <Link href="/owner/settings" style={{width:36,height:36,borderRadius:8,background:"linear-gradient(135deg,#06b6d4,#8b5cf6)",display:"grid",placeItems:"center",color:"white",fontSize:12,fontWeight:700,border:"1.5px solid rgba(6,182,212,0.3)",textDecoration:"none",flexShrink:0}}>AK</Link>
+        </div>
+      </header>
+
+      <main className="page-main">
+        <div className="a1" style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:14,marginBottom:22}}>
+          <div>
+            <div style={{fontSize:"clamp(18px,2.5vw,24px)",fontWeight:800,color:"#e2e8f0",letterSpacing:"-0.02em"}}>Lease Agreements</div>
+            <div style={{fontSize:13,color:"#94a3b8",marginTop:3}}>{LEASES.length} total leases</div>
+          </div>
+          <button className="add-btn">+ New Lease</button>
+        </div>
+
+        <div className="a2" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:12,marginBottom:20}}>
+          {[
+            {icon:"📋",label:"Total",    value:LEASES.length,                                    color:"#06b6d4",bg:"rgba(6,182,212,0.1)"},
+            {icon:"✅",label:"Active",   value:LEASES.filter(l=>l.status==="active").length,    color:"#22c55e",bg:"rgba(34,197,94,0.1)"},
+            {icon:"⚠️",label:"Expiring", value:LEASES.filter(l=>l.status==="expiring").length,  color:"#f59e0b",bg:"rgba(245,158,11,0.1)"},
+            {icon:"❌",label:"Expired",  value:LEASES.filter(l=>l.status==="expired").length,   color:"#f43f5e",bg:"rgba(244,63,94,0.1)"},
+          ].map(s=>(
+            <div key={s.label} style={{background:"#111d33",border:"1px solid #1e2d47",borderRadius:12,padding:"16px",display:"flex",alignItems:"center",gap:12}}>
+              <div style={{width:36,height:36,borderRadius:9,background:s.bg,display:"grid",placeItems:"center",fontSize:16,flexShrink:0}}>{s.icon}</div>
+              <div>
+                <div style={{fontSize:22,fontWeight:800,color:s.color}}>{s.value}</div>
+                <div style={{fontSize:11,color:"#4a6080"}}>{s.label}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="a3" style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16}}>
+          {(["all","active","expiring","expired"] as const).map(f=>(
+            <button key={f} className={`filter-btn${filter===f?" active":""}`} onClick={()=>setFilter(f)}>
+              {f==="all"?"All":f==="active"?"✅ Active":f==="expiring"?"⚠️ Expiring":"❌ Expired"}
+            </button>
+          ))}
+        </div>
+
+        <div className="glass-card a4">
+          <div className="table-wrap">
+            <div className="lease-header">
+              <span>Tenant</span><span>Property</span><span>Rent</span><span>Start</span><span>End</span><span>Status</span><span></span>
+            </div>
+            {filtered.map(l=>(
+              <div key={l.id} className="lease-row" onClick={()=>setSelected(l)}>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <div style={{width:34,height:34,borderRadius:9,background:l.grad,display:"grid",placeItems:"center",color:"white",fontSize:12,fontWeight:700,flexShrink:0}}>{l.initials}</div>
+                  <div>
+                    <div style={{fontSize:13,fontWeight:600,color:"#e2e8f0"}}>{l.tenant}</div>
+                    <div style={{fontSize:11,color:"#4a6080"}}>{l.unit} · {l.id}</div>
+                  </div>
+                </div>
+                <div style={{fontSize:12,color:"#94a3b8"}}>{l.property}</div>
+                <div style={{fontSize:13,fontWeight:700,color:"#e2e8f0"}}>{l.rent}</div>
+                <div style={{fontSize:12,color:"#4a6080"}}>{l.start}</div>
+                <div style={{fontSize:12,color:l.status==="expiring"?"#f59e0b":l.status==="expired"?"#f43f5e":"#4a6080"}}>{l.end}</div>
+                <span style={{display:"inline-flex",padding:"3px 9px",borderRadius:20,fontSize:11,fontWeight:600,background:STATUS_MAP[l.status].bg,color:STATUS_MAP[l.status].color,whiteSpace:"nowrap"}}>{STATUS_MAP[l.status].label}</span>
+                <button style={{padding:"6px 10px",background:"rgba(6,182,212,0.08)",border:"1px solid rgba(6,182,212,0.2)",borderRadius:8,color:"#06b6d4",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",flexShrink:0}} onClick={e=>{e.stopPropagation();setSelected(l)}}>View</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </main>
+    </>
+  );
+}
